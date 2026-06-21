@@ -108,7 +108,7 @@ def build_report(
 
 def save_report(reports_dir, date, content) -> str:
     """
-    content를 reports/<date>/report.md 에 저장한다.
+    content를 reports/<YYYY>/<MM>/<DD>.md 에 저장한다.
     같은 날 재실행 시 덮어쓴다.
 
     Parameters
@@ -119,11 +119,12 @@ def save_report(reports_dir, date, content) -> str:
 
     Returns
     -------
-    str — 저장된 파일의 절대(또는 상대) 경로
+    str — 저장된 파일의 절대(또는 상대) 경로 (예: reports/2026/06/21.md)
     """
-    d = os.path.join(reports_dir, date)
+    yyyy, mm, dd = date.split("-")
+    d = os.path.join(reports_dir, yyyy, mm)
     os.makedirs(d, exist_ok=True)
-    path = os.path.join(d, "report.md")
+    path = os.path.join(d, f"{dd}.md")
     with open(path, "w", encoding="utf-8") as f:
         f.write(content)
     return path

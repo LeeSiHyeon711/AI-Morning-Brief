@@ -30,7 +30,7 @@ def build_briefing_message(
         mode: "claude" | "fallback"
         catchup: True면 catch-up 수집 안내 포함
         failed_sources: 수집 실패 소스 리스트 ({"source": "..."} dict 형태)
-        report_path: 로컬 리포트 경로 (비어 있으면 출력 안 함)
+        report_path: 로컬 리포트 경로 (예: "reports/2026/06/21.md" — 비어 있으면 출력 안 함)
         profile_is_default: True면 운영자 프로필 부재 안내 포함
         char_limit: 최대 문자 수 (기본 2000)
         truncate_marker: 절삭 시 메시지 끝에 붙이는 마커

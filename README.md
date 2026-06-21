@@ -312,8 +312,9 @@ MORNINGBRIEF_REPORTS_DIR=/path/to/my/reports python main.py --no-discord
 ├── data/
 │   └── morning_brief.db           # SQLite DB (자동 생성, .gitignore 제외)
 ├── reports/
-│   └── YYYY-MM-DD/
-│       └── report.md              # 일별 리포트 (자동 생성, .gitignore 제외)
+│   └── YYYY/
+│       └── MM/
+│           └── DD.md              # 일별 리포트 (자동 생성, .gitignore 제외)
 ├── tests/
 │   ├── fixtures/
 │   │   └── sample_articles.json   # 테스트용 샘플 기사 6건

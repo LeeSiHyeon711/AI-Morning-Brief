@@ -66,8 +66,9 @@ def _test_db_path() -> str:
 
 
 def _test_report() -> str:
-    """오늘 날짜의 테스트 리포트 절대경로."""
-    return os.path.join(os.environ["MORNINGBRIEF_REPORTS_DIR"], TODAY, "report.md")
+    """오늘 날짜의 테스트 리포트 절대경로 (reports/<YYYY>/<MM>/<DD>.md)."""
+    yyyy, mm, dd = TODAY.split("-")
+    return os.path.join(os.environ["MORNINGBRIEF_REPORTS_DIR"], yyyy, mm, f"{dd}.md")
 
 
 # ──────────────────────────────────────────────
@@ -104,7 +105,7 @@ def test_qa2_dedup():
 # QA-3: Markdown 리포트가 테스트 경로에 생성되는가
 # ──────────────────────────────────────────────
 def test_qa3_report_created():
-    """--test 실행 후 reports/test/<date>/report.md 가 생성돼야 한다."""
+    """--test 실행 후 reports/<YYYY>/<MM>/<DD>.md 가 생성돼야 한다."""
     result = _run()
     assert result.returncode == 0, f"파이프라인 비정상 종료:\n{result.stderr}"
     assert os.path.exists(_test_report()), f"리포트 미생성: {_test_report()}"
