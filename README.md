@@ -237,6 +237,12 @@ python main.py [옵션]
 | `MORNINGBRIEF_RAW_DIR` | `data/raw` | raw JSON 저장 디렉토리 |
 | `MORNINGBRIEF_REPORTS_DIR` | `reports` | 리포트 저장 디렉토리 |
 
+### config.yaml 파이프라인 설정
+
+| 항목 | 기본값 | 설명 |
+|------|--------|------|
+| `pipeline.request_timeout_sec` | `15` | 소스별 RSS HTTP 요청 타임아웃 (초) |
+
 ---
 
 ## 문제 해결
