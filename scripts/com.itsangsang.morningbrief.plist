@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.itsangsang.morningbrief</string>
+
+  <!--
+    ProgramArguments: /usr/bin/python3 과 main.py 경로를 절대경로로 치환하세요.
+    치환 예: pwd 명령 결과(프로젝트 루트)를 앞에 붙여 넣으면 됩니다.
+
+    예시) 실제 경로가 /Users/me/AI-Morning-Brief/05-개발 이라면:
+      <string>/Users/me/AI-Morning-Brief/05-개발/main.py</string>
+      <string>/ABS/PATH/TO/05-개발</string>   (WorkingDirectory)
+
+    python3 경로: which python3 으로 확인 (가상환경이면 venv/bin/python3)
+  -->
+  <key>ProgramArguments</key>
+  <array>
+    <string>/usr/bin/python3</string>
+    <string>/ABS/PATH/TO/projects/AI-Morning-Brief/05-개발/main.py</string>
+  </array>
+
+  <key>WorkingDirectory</key>
+  <string>/ABS/PATH/TO/projects/AI-Morning-Brief/05-개발</string>
+
+  <!-- 매일 04:30 실행 -->
+  <key>StartCalendarInterval</key>
+  <dict>
+    <key>Hour</key>
+    <integer>4</integer>
+    <key>Minute</key>
+    <integer>30</integer>
+  </dict>
+
+  <key>StandardOutPath</key>
+  <string>/tmp/morningbrief.out.log</string>
+
+  <key>StandardErrorPath</key>
+  <string>/tmp/morningbrief.err.log</string>
+
+  <!-- 부팅 시 즉시 실행하지 않음 (스케줄 시간에만 실행) -->
+  <key>RunAtLoad</key>
+  <false/>
+
+  <key>KeepAlive</key>
+  <false/>
+</dict>
+</plist>
