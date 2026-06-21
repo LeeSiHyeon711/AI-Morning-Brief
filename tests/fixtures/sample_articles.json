@@ -1,0 +1,44 @@
+[
+  {
+    "url": "https://ex.com/a",
+    "title": "Claude Code 업데이트",
+    "published_at": "2026-06-20T09:00:00",
+    "source": "Test",
+    "raw_excerpt": "Anthropic이 Claude Code를 업데이트했다. MCP 지원이 강화되었다."
+  },
+  {
+    "url": "https://ex.com/a",
+    "title": "Claude Code 업데이트 (중복)",
+    "published_at": "2026-06-20T09:00:00",
+    "source": "Test",
+    "raw_excerpt": "중복 URL 케이스"
+  },
+  {
+    "url": "https://ex.com/b",
+    "title": "OpenAI GPT 신모델",
+    "published_at": "2026-06-19T12:00:00",
+    "source": "Test",
+    "raw_excerpt": "OpenAI가 새 GPT 모델을 발표했다."
+  },
+  {
+    "url": "https://ex.com/c",
+    "title": "MCP 생태계 확장",
+    "published_at": "2026-06-10T08:00:00",
+    "source": "Test",
+    "raw_excerpt": "MCP 서버가 늘었다."
+  },
+  {
+    "url": "https://ex.com/d",
+    "title": "GitHub Actions AI 자동화",
+    "published_at": "2026-06-05T08:00:00",
+    "source": "Test",
+    "raw_excerpt": "CI에서 AI 자동화."
+  },
+  {
+    "url": "https://ex.com/e",
+    "title": "일반 펀딩 뉴스",
+    "published_at": "2026-06-02T08:00:00",
+    "source": "Test",
+    "raw_excerpt": "어느 스타트업이 투자 유치."
+  }
+]
