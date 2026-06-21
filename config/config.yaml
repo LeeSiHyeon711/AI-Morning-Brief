@@ -1,0 +1,25 @@
+# AI-Morning-Brief 설정 파일
+# 소스 목록은 config/sources.yaml (없으면 sources.example.yaml 사용)
+
+paths:
+  # 경로 env override: 환경변수로 아래 값을 덮어쓸 수 있습니다.
+  #   db        ← MORNINGBRIEF_DB
+  #   raw_dir   ← MORNINGBRIEF_RAW_DIR
+  #   reports_dir ← MORNINGBRIEF_REPORTS_DIR
+  db: data/morning_brief.db
+  raw_dir: data/raw
+  reports_dir: reports
+
+pipeline:
+  lookback_hours: 24          # 수집 대상 기간 (시간)
+  max_articles_per_source: 20 # 소스당 최대 기사 수
+  report_language: ko         # 리포트 언어
+
+claude:
+  model: claude-opus-4-5
+  max_tokens: 4096
+  temperature: 0.3
+
+discord:
+  enabled: true
+  # webhook URL은 .env 파일의 DISCORD_WEBHOOK_URL 환경변수로 설정

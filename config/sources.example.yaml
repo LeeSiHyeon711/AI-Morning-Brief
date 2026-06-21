@@ -1,0 +1,36 @@
+# AI-Morning-Brief 뉴스 소스 설정 예시
+# 실 운영 시 이 파일을 sources.yaml로 복사해 수정하세요:
+#   cp config/sources.example.yaml config/sources.yaml
+#
+# enabled: false 로 설정하면 해당 소스를 수집에서 제외합니다.
+
+sources:
+  - name: 한겨레
+    url: https://www.hani.co.kr/rss/
+    type: rss
+    enabled: true
+    category: 국내뉴스
+
+  - name: 연합뉴스
+    url: https://www.yna.co.kr/RSS/all.xml
+    type: rss
+    enabled: true
+    category: 국내뉴스
+
+  - name: 조선일보
+    url: https://www.chosun.com/arc/outboundfeeds/rss/?outputType=xml
+    type: rss
+    enabled: false
+    category: 국내뉴스
+
+  - name: TechCrunch
+    url: https://techcrunch.com/feed/
+    type: rss
+    enabled: true
+    category: 해외기술
+
+  - name: The Verge
+    url: https://www.theverge.com/rss/index.xml
+    type: rss
+    enabled: false
+    category: 해외기술
