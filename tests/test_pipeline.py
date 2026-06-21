@@ -3,13 +3,16 @@
 pytest -q tests/test_pipeline.py で QA-1~6 를 일괄 검증한다.
 
 격리 원칙:
-  모든 테스트는 MORNINGBRIEF_DB / MORNINGBRIEF_RAW_DIR / MORNINGBRIEF_REPORTS_DIR 환경변수를
-  테스트 전용 경로로 주입해 운영 data/morning_brief.db · reports/ 를 절대 건드리지 않는다.
+  pytest tmp_path fixture 로 OS 임시 디렉토리에 테스트 전용 경로를 격리한다.
+  monkeypatch 로 MORNINGBRIEF_DB / MORNINGBRIEF_RAW_DIR / MORNINGBRIEF_REPORTS_DIR 를 주입해
+  운영 data/morning_brief.db · reports/ 를 절대 건드리지 않는다.
+  tmp_path 는 pytest 가 테스트별로 자동 생성·정리 — data/raw/ 등 빈 디렉토리 잔류 없음.
+  --force-fallback 을 기본 포함해 실제 Claude API 호출 없이 hermetic 실행
+  — 과금·네트워크 의존 없이 수 초 내 완료.
 """
 
 import datetime
 import os
-import shutil
 import sqlite3
 import subprocess
 import sys
@@ -21,25 +24,20 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 TODAY = datetime.date.today().isoformat()
 
-# 운영 경로와 분리된 테스트 전용 경로
-TEST_DB = "data/test_morning_brief.db"
-TEST_RAW = "data/raw/test"
-TEST_REPORTS = "reports/test"
-
 
 def _env():
-    """테스트용 환경변수 dict — 운영 경로를 테스트 전용 경로로 override."""
-    e = os.environ.copy()
-    e["MORNINGBRIEF_DB"] = TEST_DB
-    e["MORNINGBRIEF_RAW_DIR"] = TEST_RAW
-    e["MORNINGBRIEF_REPORTS_DIR"] = TEST_REPORTS
-    return e
+    """테스트용 환경변수 dict — clean fixture 가 monkeypatch 로 주입한 경로를 그대로 전달."""
+    return os.environ.copy()
 
 
 def _run(*flags):
-    """main.py --test --no-discord [*flags] 를 격리된 env로 실행하고 CompletedProcess 반환."""
+    """main.py --test --no-discord --force-fallback [*flags] 를 격리된 env로 실행.
+
+    --force-fallback 을 기본 포함해 실제 Claude API 를 호출하지 않는다.
+    QA-5 처럼 --force-fallback 을 추가로 전달해도 store_true 중복이라 무해하다.
+    """
     return subprocess.run(
-        [sys.executable, "main.py", "--test", "--no-discord", *flags],
+        [sys.executable, "main.py", "--test", "--no-discord", "--force-fallback", *flags],
         cwd=ROOT,
         capture_output=True,
         text=True,
@@ -48,34 +46,28 @@ def _run(*flags):
 
 
 @pytest.fixture(autouse=True)
-def clean():
-    """각 테스트 전·후에 테스트 전용 경로만 정리한다.
+def clean(tmp_path, monkeypatch):
+    """테스트 전용 경로를 pytest tmp_path(OS 임시 디렉토리)에 격리한다.
 
     운영 data/morning_brief.db · reports/ 는 절대 건드리지 않는다.
+    tmp_path 는 pytest 가 테스트별로 자동 생성·정리 — 명시적 teardown 불필요.
+    data/raw/ 등 프로젝트 경로에 빈 디렉토리를 남기지 않는다.
     """
-    # 테스트 경로만 제거 (운영 경로 미접촉)
-    for p in (os.path.join(ROOT, TEST_DB),):
-        if os.path.exists(p):
-            os.remove(p)
-    for d in (os.path.join(ROOT, TEST_RAW), os.path.join(ROOT, TEST_REPORTS)):
-        shutil.rmtree(d, ignore_errors=True)
+    monkeypatch.setenv("MORNINGBRIEF_DB", str(tmp_path / "morning_brief.db"))
+    monkeypatch.setenv("MORNINGBRIEF_RAW_DIR", str(tmp_path / "raw"))
+    monkeypatch.setenv("MORNINGBRIEF_REPORTS_DIR", str(tmp_path / "reports"))
     yield
-    # teardown: 테스트 후에도 동일 경로만 정리
-    for p in (os.path.join(ROOT, TEST_DB),):
-        if os.path.exists(p):
-            os.remove(p)
-    for d in (os.path.join(ROOT, TEST_RAW), os.path.join(ROOT, TEST_REPORTS)):
-        shutil.rmtree(d, ignore_errors=True)
+    # tmp_path 정리는 pytest 가 자동 수행 — 별도 teardown 없음
 
 
 def _test_db_path() -> str:
-    """테스트 DB 절대경로."""
-    return os.path.join(ROOT, TEST_DB)
+    """테스트 DB 절대경로 (clean fixture 가 monkeypatch 로 주입한 경로)."""
+    return os.environ["MORNINGBRIEF_DB"]
 
 
 def _test_report() -> str:
     """오늘 날짜의 테스트 리포트 절대경로."""
-    return os.path.join(ROOT, TEST_REPORTS, TODAY, "report.md")
+    return os.path.join(os.environ["MORNINGBRIEF_REPORTS_DIR"], TODAY, "report.md")
 
 
 # ──────────────────────────────────────────────
