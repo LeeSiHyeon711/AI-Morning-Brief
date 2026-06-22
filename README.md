@@ -168,7 +168,31 @@ pytest -q tests/test_pipeline.py
 
 > **launchd를 선택한 이유**: Mac이 04:30에 슬립 상태여도 깨어난 직후 놓친 작업을 실행합니다. cron은 슬립 중 작업을 영구적으로 건너뛰어 브리핑이 누락될 수 있습니다. catch-up 수집 정책과도 자연스럽게 맞물립니다.
 
-### 1단계 — plist 절대경로 치환
+> ⚠️ **중요 — 보호 폴더(TCC) 회피 · 운영 위치 분리**
+> macOS는 `~/Desktop`, `~/Documents`, `~/Downloads` 를 개인정보(TCC) 보호 폴더로 취급합니다.
+> 프로젝트가 이 폴더 아래에 있으면 launchd가 띄운 python이 파일에 접근하지 못해
+> `can't open file ... [Errno 1] Operation not permitted` 로 **매번 실패**합니다.
+> (Python에 '전체 디스크 접근'을 줘도 framework python + launchd 조합에서는 잘 적용되지 않습니다.)
+>
+> **해결**: 정기 실행용 배포본을 보호 폴더 밖(예: `~/AI-Morning-Brief-run/`)에 두고 그 경로로 등록합니다.
+> 개발/이슈 작업은 워크샵 위치에서 하고, 운영은 분리된 배포본에서 돌립니다.
+>
+> | 용도 | 위치 |
+> |------|------|
+> | 개발(코드·이슈) | `~/Desktop/IT_make_some/projects/AI-Morning-Brief/05-개발/` |
+> | 정기 실행(운영 정본) | `~/AI-Morning-Brief-run/` ← `.env`·`config/sources.yaml`·`data/`·`reports/` 의 정본 |
+>
+> **코드 갱신 후 재동기화** (운영 설정·데이터는 보존):
+> ```bash
+> rsync -a \
+>   --exclude='.env' --exclude='config/sources.yaml' \
+>   --exclude='data' --exclude='reports' \
+>   "/Users/lsh/Desktop/IT_make_some/projects/AI-Morning-Brief/05-개발/" \
+>   ~/AI-Morning-Brief-run/
+> ```
+> (최초 1회 전체 복사는 `--exclude` 없이 `rsync -a "<개발경로>/" ~/AI-Morning-Brief-run/` 로 .env·DB까지 함께 옮깁니다.)
+
+### 1단계 — plist 절대경로 치환 (보호 폴더 밖 경로로)
 
 `scripts/com.itsangsang.morningbrief.plist` 를 열어 `/ABS/PATH/TO/` 를 실제 절대경로로 교체합니다:
 
@@ -178,37 +202,44 @@ pwd
 # 예: /Users/me/projects/AI-Morning-Brief/05-개발
 ```
 
-수정 항목:
-- `ProgramArguments` 의 `main.py` 경로
-- `WorkingDirectory`
-- (선택) python3 경로: `which python3` 으로 확인. 가상환경이면 `venv/bin/python3`
+수정 항목 (모두 **보호 폴더 밖 배포본 경로**로):
+- `ProgramArguments` 의 `main.py` 경로 → 예: `~/AI-Morning-Brief-run/main.py`
+- `WorkingDirectory` → 예: `~/AI-Morning-Brief-run`
+- python3 경로: ⚠️ **`/usr/bin/python3`(시스템 python)에는 의존성이 없어 실패**합니다.
+  의존성을 설치한 python의 절대경로를 쓰세요. 확인: `python3 -c "import sys; print(sys.executable)"`
+  (예: `/Library/Frameworks/Python.framework/Versions/3.14/bin/python3`, 가상환경이면 `venv/bin/python3`)
 
 ### 2단계 — LaunchAgents 폴더에 복사 및 등록
 
 ```bash
 cp scripts/com.itsangsang.morningbrief.plist ~/Library/LaunchAgents/
-launchctl load ~/Library/LaunchAgents/com.itsangsang.morningbrief.plist
+# 최신 macOS는 bootstrap 사용 (load 는 구식)
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.itsangsang.morningbrief.plist
+launchctl enable gui/$(id -u)/com.itsangsang.morningbrief
 ```
 
 ### 3단계 — 등록 확인 및 수동 실행 테스트
 
 ```bash
 # 등록 확인
-launchctl list | grep morningbrief
+launchctl print gui/$(id -u)/com.itsangsang.morningbrief | grep -iE "state|program|working directory"
 
-# 즉시 실행 테스트 (스케줄 시간을 기다리지 않고)
-launchctl start com.itsangsang.morningbrief
+# 즉시 실행 테스트 (스케줄 시간을 기다리지 않고 — 실제 수집·Claude·Discord 발생)
+launchctl kickstart -k gui/$(id -u)/com.itsangsang.morningbrief
 
-# 로그 확인
+# 로그 확인 (성공 시 out 에 "완료: 신규 N건, 모드 claude")
 cat /tmp/morningbrief.out.log
 cat /tmp/morningbrief.err.log
 ```
 
-### 등록 해제
+### 등록 해제 / 재등록
 
 ```bash
-launchctl unload ~/Library/LaunchAgents/com.itsangsang.morningbrief.plist
-rm ~/Library/LaunchAgents/com.itsangsang.morningbrief.plist
+# 해제
+launchctl bootout gui/$(id -u)/com.itsangsang.morningbrief
+# 재등록 (plist 수정 후)
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.itsangsang.morningbrief.plist
+launchctl enable gui/$(id -u)/com.itsangsang.morningbrief
 ```
 
 ---
