@@ -9,6 +9,7 @@ from src.config_loader import load_config, load_secrets, load_operator_profile
 from src.storage import init_db, get_articles_by_range, get_meta, set_meta
 from src.analyzer import synthesize_weekly
 from src.reporter import build_weekly_report, save_bucket_report
+from src.notifier import send_discord
 
 # 정량 신호 임계값 — 라이브 시스템은 importance/relevance 0~10 스케일(스펙 확정).
 # 0~5 스케일로 회귀하면 아래 상수만 조정하면 된다(집계 로직 불변).
@@ -243,7 +244,12 @@ def run_weekly(args) -> int:
     path = save_bucket_report(cfg["paths"]["reports_dir"], iso_year, "weekly",
                               f"W{iso_week:02d}", md)
 
-    # ── (FEAT-10 hook) Discord 다이제스트 전송 자리. FEAT-09에서는 비워 둔다. ──
+    # ── FEAT-10: Discord 주간 다이제스트 전송 ──
+    if not getattr(args, "no_discord", False):
+        from src.notifier import build_weekly_message
+        msg = build_weekly_message(week_key, monday, sunday, signals,
+                                   result["synthesis"], path)
+        send_discord(secrets.get("DISCORD_WEBHOOK_URL"), msg)
 
     set_meta(conn, "last_weekly_iso_week", week_key)
     logging.info("주간보고 생성: %s → %s (mode=%s)", week_key, path, result["mode"])

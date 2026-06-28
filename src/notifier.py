@@ -79,6 +79,114 @@ def build_briefing_message(
     return msg
 
 
+def build_weekly_message(week_key, monday, sunday, signals, synthesis,
+                         report_path, char_limit=2000) -> str:
+    """주간 다이제스트(9블록, plain content, char_limit 이내 완결).
+
+    절삭이 아니라 의도적 요약 — 9블록 항목 수를 제한해 2000자 내 완결.
+
+    블록 순서(스펙 E):
+      1) 주차 + 한 줄 요약(synthesis['one_line_summary'])
+      2) 강도: 총 건수 · 피크일 · 단절일(sparse_days)
+      3) 지속 줄기 태그 Top6  ("태그 N회·M일" 인라인)
+      4) 노이즈 소스 1줄(noise_sources Top1: "소스 N건·평균 X")
+      5) 주요 흐름 테마 제목 4줄(synthesis['flow_themes'][:4])
+      6) 주목 사건 Top3(synthesis['notable_events'][:3])
+      7) 공방 즉시 착수 액션 Top3(synthesis['workshop_actions'][:3])
+      8) 다음 주 관전 포인트(synthesis['next_week_watch'])
+      9) 전체 리포트 경로(report_path)
+
+    Args:
+        week_key: ISO 주차 키 (예: "2026-W26")
+        monday: 해당 주 월요일 date
+        sunday: 해당 주 일요일 date
+        signals: aggregate_week() 반환 dict
+        synthesis: synthesize_weekly() 반환의 synthesis dict
+        report_path: 전체 리포트 파일 경로 문자열
+        char_limit: 최대 문자 수 (기본 2000)
+
+    Returns:
+        길이 <= char_limit 인 Discord 메시지 문자열
+    """
+    peak = signals.get("peak_day") or {"date": "-", "count": 0}
+    sparse = signals.get("sparse_days") or []
+    stems = signals.get("persistent_stems", [])[:6]
+    noise = signals.get("noise_sources") or []
+
+    L = []
+    # 블록 1: 주차 + 한 줄 요약
+    L.append(
+        f"📅 **AI Morning Brief 주간 — {week_key} "
+        f"({monday.month}/{monday.day}~{sunday.month}/{sunday.day})**"
+    )
+    one_line = (synthesis.get("one_line_summary") or "").strip()
+    if one_line:
+        L.append(one_line)
+
+    # 블록 2: 강도
+    peak_date = (peak.get("date") or "-")[5:] if peak.get("date") != "-" else "-"
+    intensity = (
+        f"\n📊 강도: 총 {signals['total']}건 · 피크 {peak_date} {peak.get('count', 0)}건"
+    )
+    if sparse:
+        intensity += f" · ⚠️ 단절일 {len(sparse)}일"
+    L.append(intensity)
+
+    # 블록 3: 지속 줄기 태그
+    if stems:
+        L.append(
+            "🌳 지속 줄기: "
+            + " · ".join(f"{t['tag']} {t['count']}회·{t['day_span']}일" for t in stems)
+        )
+
+    # 블록 4: 노이즈 소스
+    if noise:
+        n = noise[0]
+        L.append(f"⚠️ 노이즈 소스: {n['source']} {n['count']}건·평균 {n['avg_importance']}")
+
+    # 블록 5: 주요 흐름 테마
+    if synthesis.get("flow_themes"):
+        L.append(
+            "🧵 주요 흐름:\n"
+            + "\n".join(f"• {x}" for x in synthesis["flow_themes"][:4])
+        )
+
+    # 블록 6: 주목 사건
+    if synthesis.get("notable_events"):
+        L.append(
+            "⭐ 주목 사건:\n"
+            + "\n".join(
+                f"{i + 1}. {x}"
+                for i, x in enumerate(synthesis["notable_events"][:3])
+            )
+        )
+
+    # 블록 7: 공방 즉시 착수 액션
+    if synthesis.get("workshop_actions"):
+        L.append(
+            "🎯 공방 즉시 착수:\n"
+            + "\n".join(
+                f"{i + 1}. {x}"
+                for i, x in enumerate(synthesis["workshop_actions"][:3])
+            )
+        )
+
+    # 블록 8: 다음 주 관전 포인트
+    if synthesis.get("next_week_watch"):
+        L.append(
+            "🔭 다음 주 관전: "
+            + " / ".join(synthesis["next_week_watch"][:3])
+        )
+
+    # 블록 9: 전체 리포트 경로
+    L.append(f"📄 전체 리포트: {report_path}")
+
+    msg = "\n".join(s for s in L if s)
+    if len(msg) > char_limit:          # 안전망 — 설계상 9블록은 2000자 내 완결
+        msg = msg[: char_limit - 1] + "…"
+    return msg
+
+
 def send_discord(webhook_url, message) -> bool:
     """Discord Webhook으로 메시지를 전송한다.
 

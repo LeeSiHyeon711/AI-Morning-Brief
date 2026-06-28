@@ -319,6 +319,94 @@ MORNINGBRIEF_REPORTS_DIR=/path/to/my/reports python main.py --no-discord
 
 ---
 
+## 주간 흐름 리포트 (`--weekly`) 운영
+
+매주 일요일 새벽 4시 40분에 직전 ISO 주차의 흐름 리포트를 자동 생성하고 Discord로 전송합니다.
+
+### 수동 생성
+
+```bash
+# 이번 주 자동 산정
+python main.py --weekly
+
+# 특정 주 강제 생성
+python main.py --weekly --week 2026-W26
+
+# Discord 전송 없이 리포트만 생성
+python main.py --weekly --no-discord
+```
+
+### launchd 스케줄 등록 (일요일 04:40)
+
+> 일간 잡(04:30)과 10분 차이를 두는 이유: 주간 잡은 직전 토요일까지의 데이터를 집계하는데, 일간 잡이 먼저 그날 마지막 데이터를 저장하고 나서 주간 집계가 읽어야 안전합니다. 경합이 우려되면 plist의 Minute를 50으로 늘릴 수 있습니다(잡 자체는 멱등).
+
+**1단계 — plist 절대경로 치환 (보호 폴더 밖 경로로)**
+
+`scripts/com.itsangsang.morningbrief.weekly.plist` 를 열어 `/ABS/PATH/TO` 를 실제 절대경로로 교체합니다.
+운영 배포본 경로(`~/AI-Morning-Brief-run/`)를 기준으로 치환하세요.
+
+```bash
+# python3 경로 확인
+python3 -c "import sys; print(sys.executable)"
+# 예: /Library/Frameworks/Python.framework/Versions/3.14/bin/python3
+
+# 배포본 경로 확인
+echo ~/AI-Morning-Brief-run
+```
+
+수정 항목:
+- `ProgramArguments[0]` → 의존성이 설치된 python3 절대경로
+- `ProgramArguments[1]` → `~/AI-Morning-Brief-run/main.py` 절대경로
+- `WorkingDirectory` → `~/AI-Morning-Brief-run` 절대경로
+
+**2단계 — LaunchAgents 등록**
+
+```bash
+cp scripts/com.itsangsang.morningbrief.weekly.plist ~/Library/LaunchAgents/
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.itsangsang.morningbrief.weekly.plist
+launchctl enable gui/$(id -u)/com.itsangsang.morningbrief.weekly
+```
+
+**3단계 — 등록 확인**
+
+```bash
+launchctl print gui/$(id -u)/com.itsangsang.morningbrief.weekly | grep -iE "state|program|working"
+cat /tmp/morningbrief.weekly.out.log
+cat /tmp/morningbrief.weekly.err.log
+```
+
+**등록 해제 / 재등록**
+
+```bash
+launchctl bootout gui/$(id -u)/com.itsangsang.morningbrief.weekly
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.itsangsang.morningbrief.weekly.plist
+launchctl enable gui/$(id -u)/com.itsangsang.morningbrief.weekly
+```
+
+### 운영 배포본 동기화 (`~/AI-Morning-Brief-run`)
+
+코드 갱신 후 운영 배포본에 재동기화합니다(일간과 동일 패턴):
+
+```bash
+rsync -a \
+  --exclude='.env' --exclude='config/sources.yaml' \
+  --exclude='data' --exclude='reports' \
+  "/Users/lsh/Desktop/IT_make_some/projects/AI-Morning-Brief/05-개발/" \
+  ~/AI-Morning-Brief-run/
+```
+
+- 주간 plist 경로는 `~/AI-Morning-Brief-run/main.py` 기준으로 설정합니다.
+- 동기화 후 반드시 `plutil -lint ~/Library/LaunchAgents/com.itsangsang.morningbrief.weekly.plist` 로 plist 유효성을 확인하세요.
+
+### 산출물
+
+| 항목 | 위치 |
+|------|------|
+| 주간 전문(.md) | `reports/<ISO연도>/weekly/W##.md` |
+| Discord 다이제스트 | 일간과 동일 웹훅 — 9블록 plain content, 2000자 이내 |
+
+---
+
 ## 파일 구조
 
 ```
