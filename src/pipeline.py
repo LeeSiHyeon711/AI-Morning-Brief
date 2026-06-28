@@ -30,6 +30,29 @@ def _iso(dt) -> str:
     return dt.isoformat()
 
 
+def _should_advance_cursor(new_count: int, enabled_count: int, failed_count: int) -> bool:
+    """catch-up 커서(last_success_at)를 이번 실행이 전진시켜도 되는지 판정한다. (이슈 #13)
+
+    네트워크 단절 등으로 **전 소스 수집에 실패해 신규 0건**인 실행이 커서를 전진시키면
+    단절 구간의 기사가 다음 실행에서 영구 누락된다. 따라서 이 경우만 커서를 보존한다.
+
+    ★ '정상 0건'(주말 등 소스는 정상 응답했으나 신규 기사만 없음)과 반드시 구분한다.
+       성공한 소스가 1개라도 있으면(= 소스가 정상 동작) 전진한다.
+
+    Args:
+        new_count:     이번 실행에서 새로 저장된 기사 수
+        enabled_count: enabled 상태인 소스 수
+        failed_count:  수집에 실패한 소스 수 (collect의 errors 길이)
+
+    Returns:
+        True  → 커서 전진(set_meta) 허용
+        False → 전 소스 실패(신규 0건) → 커서 보존(다음 정상 실행이 누락 구간 보완)
+    """
+    succeeded_source_count = enabled_count - failed_count
+    all_sources_failed = (new_count == 0) and (succeeded_source_count <= 0)
+    return not all_sources_failed
+
+
 def _determine_range(args, conn, cfg) -> tuple:
     """수집 범위(start, end, catchup)를 결정한다.
 
@@ -181,10 +204,19 @@ def run(args) -> int:
         send_discord(secrets.get("DISCORD_WEBHOOK_URL"), msg)
 
     # 성공 meta 갱신 — 다음 실행의 catch-up 기준이 됨
-    now_iso = datetime.now().isoformat()
-    set_meta(conn, "last_success_at", now_iso)
-    set_meta(conn, "last_report_range_start", start)
-    set_meta(conn, "last_report_range_end", end)
+    # ★ 이슈 #13: 전 소스 수집 실패(신규 0건)면 커서를 전진시키지 않는다(단절 구간 누락 방지).
+    enabled_count = sum(1 for s in sources if s.get("enabled", True))
+    if _should_advance_cursor(new_count, enabled_count, len(errors)):
+        now_iso = datetime.now().isoformat()
+        set_meta(conn, "last_success_at", now_iso)
+        set_meta(conn, "last_report_range_start", start)
+        set_meta(conn, "last_report_range_end", end)
+    else:
+        logging.warning(
+            "전 소스 수집 실패(신규 0건) — last_success_at 미갱신: "
+            "다음 정상 실행이 누락 구간(%s~)을 보완합니다.",
+            start,
+        )
 
     logging.info("완료: 신규 %d건, 모드 %s, 리포트 %s", new_count, result["mode"], path)
     return 0
