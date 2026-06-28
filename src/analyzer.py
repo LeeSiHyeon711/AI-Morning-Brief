@@ -137,6 +137,97 @@ def _parse_response(text: str, articles: list) -> dict:
     return data
 
 
+# ── 주간 합성 함수 (FEAT-09) — 기존 일간 코드 수정 없이 하단에 추가 ──────────────
+
+def synthesize_weekly(signals, ideas, top_articles, operator_profile,
+                      api_key=None, model="claude-sonnet-4-6",
+                      max_output_tokens=16000, force_fallback=False) -> dict:
+    """주간 흐름을 합성한다. 반환: {"mode": "claude"|"fallback", "synthesis": {...}}.
+
+    synthesis 스키마:
+      {"one_line_summary": str, "flow_themes": [str,...<=4],
+       "notable_events": [str,...<=3], "workshop_actions": [str,...<=3],
+       "next_week_watch": [str,...], "narrative": str}
+    모든 예외(키 없음·모델명 오류·API 실패·JSON 파싱 실패)는 _fallback_weekly로 흡수.
+    """
+    if force_fallback or not api_key:
+        return {"mode": "fallback", "synthesis": _fallback_weekly(signals, ideas, top_articles)}
+    try:
+        prompt = _build_weekly_prompt(signals, ideas, top_articles, operator_profile)
+        text = _call_claude(prompt, api_key, model, max_output_tokens)  # 기존 일간 호출 재사용
+        data = _parse_weekly_response(text)
+        return {"mode": "claude", "synthesis": data}
+    except Exception as ex:
+        logging.error("주간 합성 실패 → fallback: %s", ex)
+        return {"mode": "fallback", "synthesis": _fallback_weekly(signals, ideas, top_articles)}
+
+
+def _build_weekly_prompt(signals, ideas, top_articles, operator_profile) -> dict:
+    """주간 합성용 system/user dict. 정량 신호를 '근거'로 명시 투입(서술이 숫자에 정합하도록)."""
+    import json as _json
+    sig = {
+        "total": signals["total"],
+        "daily_intensity": signals["daily_intensity"],
+        "peak_day": signals["peak_day"],
+        "sparse_days": signals["sparse_days"],
+        "persistent_stems": [{"tag": t["tag"], "count": t["count"], "day_span": t["day_span"]}
+                             for t in signals["persistent_stems"][:12]],
+        "bursts": [{"tag": t["tag"], "count": t["count"], "day_span": t["day_span"]}
+                   for t in signals["bursts"][:8]],
+        "noise_sources": signals["noise_sources"],
+    }
+    arts = [{"title": a["title"], "source": a["source"], "summary": a.get("summary", ""),
+             "tags": a.get("tags", []), "importance": a.get("importance", 0),
+             "relevance": a.get("relevance", 0)} for a in top_articles]
+    system = (
+        "당신은 IT상상공방 운영자의 'AI 주간 흐름 분석가'다. 아래 <운영자 프로필>을 렌즈로,"
+        " 제공된 <정량 신호>를 반드시 근거로 삼아(서술이 숫자와 모순되지 않게) 한 주의 흐름을"
+        " 합성하라. 단발 버스트(노이즈)와 지속 줄기(구조적 흐름)를 구분하라. 지정된 JSON만 출력하라.\n\n"
+        "<운영자 프로필>\n" + operator_profile + "\n</운영자 프로필>")
+    user = (
+        "<정량 신호 (JSON)>\n" + _json.dumps(sig, ensure_ascii=False) + "\n</정량 신호>\n\n"
+        "<일간 아이디어 통합 (반복일수 days 포함)>\n" + _json.dumps(ideas, ensure_ascii=False) + "\n</일간 아이디어>\n\n"
+        "<상위 기사 (JSON)>\n" + _json.dumps(arts, ensure_ascii=False) + "\n</상위 기사>\n\n"
+        "출력 스키마:\n"
+        '{"one_line_summary":"<이번 주 한 줄 요약>",'
+        '"flow_themes":["주요 흐름 테마 제목 최대 4개"],'
+        '"notable_events":["주목 사건 최대 3개"],'
+        '"workshop_actions":["공방 즉시 착수 액션 최대 3개(반복 등장 아이디어 우선)"],'
+        '"next_week_watch":["다음 주 관전 포인트"],'
+        '"narrative":"<주간 흐름 서술, 한국어, 정량 신호에 정합>"}')
+    return {"system": system, "user": user}
+
+
+def _parse_weekly_response(text: str) -> dict:
+    """첫 { ~ 마지막 } 슬라이스 후 json.loads + 누락 필드 기본값 보정."""
+    s, e = text.find("{"), text.rfind("}")
+    if s == -1 or e == -1:
+        raise ValueError("주간 응답에 JSON 객체가 없음")
+    data = json.loads(text[s:e + 1])
+    data.setdefault("one_line_summary", "")
+    for k in ("flow_themes", "notable_events", "workshop_actions", "next_week_watch"):
+        data.setdefault(k, [])
+    data.setdefault("narrative", "")
+    return data
+
+
+def _fallback_weekly(signals, ideas, top_articles) -> dict:
+    """규칙기반 주간 합성(Claude 없이). 정량 신호에서 직접 문장을 만든다."""
+    stems = [t["tag"] for t in signals["persistent_stems"][:6]]
+    one = f"이번 주 총 {signals['total']}건. 지속 줄기: " + (", ".join(stems) if stems else "없음")
+    themes = [a["title"] for a in top_articles[:4]]
+    events = [a["title"] for a in top_articles[:3]]
+    actions = [i["text"] for i in ideas[:3]] or [a["title"] for a in signals["workshop_picks"][:3]]
+    watch = [t["tag"] for t in signals["persistent_stems"][:2]]
+    narr = ("[기본 주간 리포트] " + one
+            + (f" / 노이즈 후보: {[s['source'] for s in signals['noise_sources']]}"
+               if signals["noise_sources"] else ""))
+    return {"one_line_summary": one, "flow_themes": themes, "notable_events": events,
+            "workshop_actions": actions, "next_week_watch": watch, "narrative": narr}
+
+
+# ── 일간 fallback (기존 — 수정 금지) ──────────────────────────────────────────
+
 def _fallback_analyze(articles: list) -> dict:
     """규칙 기반 fallback 분석. 항상 mode='fallback'을 반환한다.
 

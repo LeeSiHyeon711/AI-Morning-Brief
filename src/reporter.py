@@ -106,6 +106,185 @@ def build_report(
     return "\n".join(head) + "\n" + "\n".join(body)
 
 
+# ── 주간 리포트 함수 (FEAT-09) — 기존 save_report 패턴 일반화 + 주간 전문 빌더 ──
+
+def save_bucket_report(reports_dir, year, bucket, name, content) -> str:
+    """reports/<year>/<bucket>/<name>.md 로 저장(makedirs + 경로 조립).
+
+    주간: bucket="weekly", name="W26" → reports/2026/weekly/W26.md
+    (월간 #12 확장 예약: bucket="monthly", name="M06")
+    기존 save_report(일간)와 동일 패턴이며 일간 경로(<YYYY>/<MM>/<DD>.md)는 변경하지 않는다.
+    """
+    d = os.path.join(reports_dir, f"{int(year):04d}", bucket)
+    os.makedirs(d, exist_ok=True)
+    path = os.path.join(d, f"{name}.md")
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(content)
+    return path
+
+
+def build_weekly_report(week_key, monday, sunday, signals, ideas, top, synthesis, mode) -> str:
+    """주간 전문 Markdown. 표(강도/태그/소스)는 전문에만 둔다(Discord는 표 미렌더).
+
+    섹션: 헤더(주차·범위·모드) → 한 줄 요약 → 강도 추이 표 → 지속 줄기 vs 단발 버스트 표
+         → 소스 신호 품질 표(노이즈 경고) → 공방 관련 픽 → 주요 흐름 테마 → 주목 사건
+         → 공방 즉시 착수 → 다음 주 관전 → 일간 아이디어 통합 → 주간 서술 → 상위 원문 링크.
+    """
+    lines = []
+
+    # ── 헤더 ──
+    lines.append(f"# AI Weekly Brief — {week_key}")
+    lines.append(f"- 기간: {monday.isoformat()} ~ {sunday.isoformat()}")
+    lines.append(f"- 분석 모드: {mode}")
+    if mode == "fallback":
+        lines.append("> **AI 합성 실패 / 기본 주간 리포트**")
+    lines.append("")
+
+    # ── 한 줄 요약 ──
+    lines.append("## 이번 주 한 줄 요약")
+    lines.append("")
+    lines.append(synthesis.get("one_line_summary", ""))
+    lines.append("")
+
+    # ── 1. 일자별 강도 추이 표 ──
+    lines.append("## 일자별 수집 강도 추이")
+    lines.append("")
+    lines.append("| 일자 | 건수 | 고중요(≥8) | 평균중요도 | 비고 |")
+    lines.append("|------|------|-----------|-----------|------|")
+    for row in signals.get("daily_intensity", []):
+        note = " ⚠️ 데이터 빈약" if row.get("sparse") else ""
+        lines.append(
+            f"| {row['date']} | {row['count']} | {row['high_count']} "
+            f"| {row['avg_importance']} |{note} |"
+        )
+    peak = signals.get("peak_day")
+    if peak:
+        lines.append(f"\n- 피크일: {peak['date']} ({peak['count']}건)")
+    sparse = signals.get("sparse_days", [])
+    if sparse:
+        lines.append(f"- 데이터 빈약일(⚠️): {', '.join(sparse)}")
+    lines.append("")
+
+    # ── 2. 태그 지속성 표 ──
+    lines.append("## 태그 빈도 × 지속성")
+    lines.append("")
+    lines.append("| 태그 | 등장 | 지속일수 | 구분 |")
+    lines.append("|------|------|---------|------|")
+    for t in signals.get("tags", [])[:20]:
+        if t["persistent"]:
+            label = "지속 줄기"
+        elif t["burst"]:
+            label = "단발 버스트"
+        else:
+            label = ""
+        lines.append(f"| {t['tag']} | {t['count']} | {t['day_span']} | {label} |")
+    stems = signals.get("persistent_stems", [])
+    bursts = signals.get("bursts", [])
+    if stems:
+        lines.append(f"\n**지속 줄기(≥5일)**: {', '.join(t['tag'] for t in stems[:8])}")
+    if bursts:
+        lines.append(f"**단발 버스트(≤2일, ≥5건)**: {', '.join(t['tag'] for t in bursts[:8])}")
+    lines.append("")
+
+    # ── 3. 소스 신호 품질 표 ──
+    lines.append("## 소스 신호 품질")
+    lines.append("")
+    lines.append("| 소스 | 건수 | 평균중요도 | 노이즈 후보 |")
+    lines.append("|------|------|-----------|------------|")
+    for s in signals.get("sources", []):
+        noise = " ⚠️" if s.get("noise_candidate") else ""
+        lines.append(
+            f"| {s['source']} | {s['count']} | {s['avg_importance']} |{noise} |"
+        )
+    noise_srcs = signals.get("noise_sources", [])
+    if noise_srcs:
+        lines.append(f"\n> ⚠️ 노이즈 후보 소스: {[s['source'] for s in noise_srcs]}")
+    lines.append("")
+
+    # ── 4. 공방 관련 픽 ──
+    picks = signals.get("workshop_picks", [])
+    lines.append("## 공방 관련 픽 (relevance ≥ 7)")
+    lines.append("")
+    if picks:
+        for a in picks[:10]:
+            lines.append(
+                f"- [{a.get('title', '')}]({a.get('url', '')}) "
+                f"— 중요도 {a.get('importance', 0)}, 관련도 {a.get('relevance', 0)}"
+            )
+    else:
+        lines.append("_해당 없음_")
+    lines.append("")
+
+    # ── 5. 주요 흐름 테마 ──
+    lines.append("## 주요 흐름 테마")
+    lines.append("")
+    for theme in synthesis.get("flow_themes", []):
+        lines.append(f"- {theme}")
+    if not synthesis.get("flow_themes"):
+        lines.append("_해당 없음_")
+    lines.append("")
+
+    # ── 6. 주목 사건 ──
+    lines.append("## 주목 사건")
+    lines.append("")
+    for ev in synthesis.get("notable_events", []):
+        lines.append(f"- {ev}")
+    if not synthesis.get("notable_events"):
+        lines.append("_해당 없음_")
+    lines.append("")
+
+    # ── 7. 공방 즉시 착수 ──
+    lines.append("## 공방 즉시 착수")
+    lines.append("")
+    for act in synthesis.get("workshop_actions", []):
+        lines.append(f"- {act}")
+    if not synthesis.get("workshop_actions"):
+        lines.append("_해당 없음_")
+    lines.append("")
+
+    # ── 8. 다음 주 관전 포인트 ──
+    lines.append("## 다음 주 관전 포인트")
+    lines.append("")
+    for w in synthesis.get("next_week_watch", []):
+        lines.append(f"- {w}")
+    if not synthesis.get("next_week_watch"):
+        lines.append("_해당 없음_")
+    lines.append("")
+
+    # ── 9. 일간 아이디어 통합 ──
+    lines.append("## 일간 아이디어 통합 (7일)")
+    lines.append("")
+    if ideas:
+        for idea in ideas:
+            days_str = f"({idea['days']}일 반복)" if idea['days'] > 1 else "(1회)"
+            lines.append(f"- {idea['text']} {days_str}")
+    else:
+        lines.append("_해당 없음_")
+    lines.append("")
+
+    # ── 10. 주간 서술 ──
+    lines.append("## 주간 흐름 서술")
+    lines.append("")
+    lines.append(synthesis.get("narrative", ""))
+    lines.append("")
+
+    # ── 11. 상위 원문 링크 ──
+    lines.append("## 상위 원문 링크")
+    lines.append("")
+    for a in top[:20]:
+        lines.append(
+            f"- [{a.get('title', '')}]({a.get('url', '')}) "
+            f"— {a.get('source', '')} (중요도 {a.get('importance', 0)})"
+        )
+    if not top:
+        lines.append("_해당 없음_")
+    lines.append("")
+
+    return "\n".join(lines)
+
+
+# ── 일간 save_report (기존 — 수정 금지) ──────────────────────────────────────
+
 def save_report(reports_dir, date, content) -> str:
     """
     content를 reports/<YYYY>/<MM>/<DD>.md 에 저장한다.

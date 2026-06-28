@@ -66,6 +66,18 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="RSS 소스 접근성 진단만 실행하고 종료",
     )
+    # FEAT-09: 주간 흐름 리포트
+    p.add_argument(
+        "--weekly",
+        action="store_true",
+        help="주간 흐름 리포트를 생성(트리거: meta 커서로 멱등). launchd 주간 잡이 호출",
+    )
+    p.add_argument(
+        "--week",
+        default=None,
+        metavar="YYYY-W##",
+        help="주간보고 대상 ISO 주차를 명시(수동 강제 생성). 예: 2026-W26",
+    )
     return p
 
 
@@ -78,6 +90,11 @@ def main() -> int:
     )
 
     args = build_parser().parse_args()
+
+    # FEAT-09: --weekly 분기 (일간 파이프라인보다 먼저 디스패치)
+    if getattr(args, "weekly", False):
+        from src.weekly import run_weekly
+        return run_weekly(args)
 
     try:
         from src.pipeline import run  # type: ignore[import]
