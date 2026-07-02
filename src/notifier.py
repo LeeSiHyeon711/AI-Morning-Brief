@@ -79,6 +79,25 @@ def build_briefing_message(
     return msg
 
 
+def _finalize_with_report_path(body_lines, report_path, char_limit) -> str:
+    """본문 블록들을 조립하되 '📄 전체 리포트' 줄은 절삭 없이 항상 보존한다.
+
+    char_limit 초과 시 report_path 줄의 길이를 먼저 빼놓고 본문만 잘라
+    안내 마커를 붙인 뒤, report_path 줄을 맨 끝에 항상 이어붙인다.
+    """
+    truncate_marker = "…(이하 생략, 전체는 로컬 리포트 참조)"
+    report_line = f"📄 전체 리포트: {report_path}"
+    body = "\n".join(s for s in body_lines if s)
+    msg = f"{body}\n{report_line}" if body else report_line
+
+    if len(msg) > char_limit:
+        reserved = len(report_line) + len(truncate_marker) + 2  # 두 줄바꿈
+        body = body[: max(char_limit - reserved, 0)]
+        msg = f"{body}\n{truncate_marker}\n{report_line}"
+
+    return msg
+
+
 def build_weekly_message(week_key, monday, sunday, signals, synthesis,
                          report_path, char_limit=2000) -> str:
     """주간 다이제스트(9블록, plain content, char_limit 이내 완결).
@@ -178,13 +197,8 @@ def build_weekly_message(week_key, monday, sunday, signals, synthesis,
             + " / ".join(synthesis["next_week_watch"][:3])
         )
 
-    # 블록 9: 전체 리포트 경로
-    L.append(f"📄 전체 리포트: {report_path}")
-
-    msg = "\n".join(s for s in L if s)
-    if len(msg) > char_limit:          # 안전망 — 설계상 9블록은 2000자 내 완결
-        msg = msg[: char_limit - 1] + "…"
-    return msg
+    # 블록 9: 전체 리포트 경로 — 절삭이 발생해도 항상 보존 (_finalize_with_report_path)
+    return _finalize_with_report_path(L, report_path, char_limit)
 
 
 def build_monthly_message(ym, first, last, signals, basis, synthesis,
@@ -251,12 +265,8 @@ def build_monthly_message(ym, first, last, signals, basis, synthesis,
         L.append("🎯 공방 즉시 착수:\n" + "\n".join(f"{i + 1}. {x}" for i, x in enumerate(synthesis["workshop_actions"][:3])))
     if synthesis.get("next_month_watch"):
         L.append("🔭 다음 달 관전: " + " / ".join(synthesis["next_month_watch"][:3]))
-    L.append(f"📄 전체 리포트: {report_path}")
-
-    msg = "\n".join(s for s in L if s)
-    if len(msg) > char_limit:              # 안전망(설계상 9블록은 2000자 내 완결)
-        msg = msg[:char_limit - 1] + "…"
-    return msg
+    # 블록 9: 전체 리포트 경로 — 절삭이 발생해도 항상 보존 (_finalize_with_report_path)
+    return _finalize_with_report_path(L, report_path, char_limit)
 
 
 def send_discord(webhook_url, message) -> bool:

@@ -190,10 +190,10 @@ def _build_weekly_prompt(signals, ideas, top_articles, operator_profile) -> dict
         "<상위 기사 (JSON)>\n" + _json.dumps(arts, ensure_ascii=False) + "\n</상위 기사>\n\n"
         "출력 스키마:\n"
         '{"one_line_summary":"<이번 주 한 줄 요약>",'
-        '"flow_themes":["주요 흐름 테마 제목 최대 4개"],'
-        '"notable_events":["주목 사건 최대 3개"],'
-        '"workshop_actions":["공방 즉시 착수 액션 최대 3개(반복 등장 아이디어 우선)"],'
-        '"next_week_watch":["다음 주 관전 포인트"],'
+        '"flow_themes":["주요 흐름 테마 제목 최대 4개, 각 항목 80자 이내"],'
+        '"notable_events":["주목 사건 최대 3개, 각 항목 100자 이내"],'
+        '"workshop_actions":["공방 즉시 착수 액션 최대 3개(반복 등장 아이디어 우선), 각 항목 100자 이내"],'
+        '"next_week_watch":["다음 주 관전 포인트, 각 항목 80자 이내"],'
         '"narrative":"<주간 흐름 서술, 한국어, 정량 신호에 정합>"}')
     return {"system": system, "user": user}
 
@@ -294,10 +294,10 @@ def _build_monthly_prompt(signals, ideas, top_articles, basis, operator_profile)
         "<대표 기사 (JSON, cross_source_count 포함)>\n" + json.dumps(arts, ensure_ascii=False) + "\n</대표 기사>\n\n"
         "출력 스키마:\n"
         '{"one_line_summary":"<이번 달 한 줄 요약>",'
-        '"flow_themes":["[라벨] 주요 흐름 테마 최대 4개"],'
-        '"notable_events":["[라벨] 주목 사건 최대 3개"],'
-        '"workshop_actions":["공방 즉시 착수 액션 최대 3개(2차=공방 적용성 상위, 반복 아이디어 우선)"],'
-        '"next_month_watch":["다음 달 관전 포인트 최대 3개"],'
+        '"flow_themes":["[라벨] 주요 흐름 테마 최대 4개, 각 항목 100자 이내([라벨] 포함)"],'
+        '"notable_events":["[라벨] 주목 사건 최대 3개, 각 항목 100자 이내([라벨] 포함)"],'
+        '"workshop_actions":["공방 즉시 착수 액션 최대 3개(2차=공방 적용성 상위, 반복 아이디어 우선), 각 항목 100자 이내"],'
+        '"next_month_watch":["다음 달 관전 포인트 최대 3개, 각 항목 80자 이내"],'
         '"narrative":"<월간 흐름 서술, 한국어, 핵심 주장마다 [라벨] 접두, 정량 신호에 정합>"}')
     return {"system": system, "user": user}
 
