@@ -78,6 +78,18 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="YYYY-W##",
         help="주간보고 대상 ISO 주차를 명시(수동 강제 생성). 예: 2026-W26",
     )
+    # FEAT-12: 월간 흐름 리포트
+    p.add_argument(
+        "--monthly",
+        action="store_true",
+        help="월간 흐름 리포트를 생성(트리거: meta 커서로 멱등). launchd 월간 잡이 호출",
+    )
+    p.add_argument(
+        "--month",
+        default=None,
+        metavar="YYYY-MM",
+        help="월간보고 대상 달을 명시(수동 강제 생성). 예: 2026-06",
+    )
     return p
 
 
@@ -95,6 +107,11 @@ def main() -> int:
     if getattr(args, "weekly", False):
         from src.weekly import run_weekly
         return run_weekly(args)
+
+    # FEAT-12: --monthly 분기 (--weekly 분기 다음, 일간 파이프라인 앞)
+    if getattr(args, "monthly", False):
+        from src.monthly import run_monthly
+        return run_monthly(args)
 
     try:
         from src.pipeline import run  # type: ignore[import]

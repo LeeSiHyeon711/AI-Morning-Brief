@@ -283,6 +283,229 @@ def build_weekly_report(week_key, monday, sunday, signals, ideas, top, synthesis
     return "\n".join(lines)
 
 
+# ── 월간 리포트 함수 (FEAT-12) — 기존 일간·주간 코드 수정 없이 하단에 추가 ──────
+
+def _count_labels(synthesis) -> dict:
+    """flow_themes+notable_events+narrative 전체 텍스트에서 [확정]/[추정]/[주의] 등장 수 집계."""
+    text = " ".join(synthesis.get("flow_themes", []) + synthesis.get("notable_events", [])
+                    + [synthesis.get("narrative", "")])
+    return {
+        "확정": text.count("[확정]"),
+        "추정": text.count("[추정]"),
+        "주의": text.count("[주의]"),
+    }
+
+
+def build_monthly_report(ym, first, last, signals, ideas, top, out_of_period, basis,
+                         synthesis, mode) -> str:
+    """월간 전문 Markdown. 표(강도/태그/소스편중/노이즈유형)는 전문에만. 상단에 분석 기반·노이즈 명시.
+
+    섹션 순서:
+      헤더(월·범위·모드) →
+      > 분석 기반 한 줄: 수집N·1차통과M·대표K·범위외P·노이즈Q · 신뢰도(확정/추정/주의 카운트) →   # #12-7 상단
+      ## 0. 분석 기반과 제외 내역 (노이즈 유형별 건수 표 + 범위 외 참고 항목 건수) →              # #12-7
+      ## 1. 이번 달 한 줄 요약 →
+      ## 2. 월간 핵심 흐름 테마 (각 항목 [라벨]) →                                              # #12-2
+      ## 3. 주목 사건 (각 항목 [라벨]) →
+      ## 4. 강도 추이 표(일자·건수·고중요·평균) →
+      ## 5. 지속 줄기 vs 단발 버스트 표 →
+      ## 6. 소스 편중도 표(소스·건수·점유율%·평균중요도·노이즈여부) →                            # #12-5,6
+      ## 7. 공방 관련 픽 / 공방 즉시 착수 액션 →
+      ## 8. 일간 아이디어 통합 →
+      ## 9. 다음 달 관전 포인트 →
+      ## 10. 월간 서술(narrative, [라벨] 포함) →
+      ## 11. 대표 원문 링크(top) →
+      ## 12. 범위 외 참고 항목(out_of_period 제목·published_at, 건수 상한 20)                    # #12-1
+    """
+    lines = []
+    label_counts = _count_labels(synthesis)
+    noise = basis.get("noise", {}) or {}
+
+    # ── 헤더 ──
+    lines.append(f"# AI Monthly Brief — {ym}")
+    lines.append(f"- 기간: {first.isoformat()} ~ {last.isoformat()}")
+    lines.append(f"- 분석 모드: {mode}")
+    if mode == "fallback":
+        lines.append("> **AI 합성 실패 / 기본 월간 리포트**")
+    lines.append(
+        f"> 📊 수집 {basis.get('collected', 0)} · 1차통과 {basis.get('first_stage_passed', 0)} "
+        f"· 대표 {basis.get('represented', 0)} · 범위외 {basis.get('out_of_period', 0)} "
+        f"· 노이즈 {noise.get('_total', 0)} "
+        f"· 신뢰도 [확정 {label_counts['확정']}/추정 {label_counts['추정']}/주의 {label_counts['주의']}]"
+    )
+    lines.append("")
+
+    # ── 0. 분석 기반과 제외 내역 ──
+    lines.append("## 0. 분석 기반과 제외 내역")
+    lines.append("")
+    lines.append("| 유형 | 건수 |")
+    lines.append("|------|------|")
+    for k, v in noise.items():
+        if k == "_total":
+            continue
+        lines.append(f"| {k} | {v} |")
+    lines.append(f"| **합계** | **{noise.get('_total', 0)}** |")
+    lines.append("")
+    lines.append(f"- 범위 외 참고 항목(월 경계 밖): {basis.get('out_of_period', 0)}건 (## 12 참조)")
+    lines.append("")
+
+    # ── 1. 한 줄 요약 ──
+    lines.append("## 1. 이번 달 한 줄 요약")
+    lines.append("")
+    lines.append(synthesis.get("one_line_summary", ""))
+    lines.append("")
+
+    # ── 2. 월간 핵심 흐름 테마 ──
+    lines.append("## 2. 월간 핵심 흐름 테마")
+    lines.append("")
+    for theme in synthesis.get("flow_themes", []):
+        lines.append(f"- {theme}")
+    if not synthesis.get("flow_themes"):
+        lines.append("_해당 없음_")
+    lines.append("")
+
+    # ── 3. 주목 사건 ──
+    lines.append("## 3. 주목 사건")
+    lines.append("")
+    for ev in synthesis.get("notable_events", []):
+        lines.append(f"- {ev}")
+    if not synthesis.get("notable_events"):
+        lines.append("_해당 없음_")
+    lines.append("")
+
+    # ── 4. 강도 추이 표 ──
+    lines.append("## 4. 일자별 수집 강도 추이")
+    lines.append("")
+    lines.append("| 일자 | 건수 | 고중요(≥8) | 평균중요도 | 비고 |")
+    lines.append("|------|------|-----------|-----------|------|")
+    for row in signals.get("daily_intensity", []):
+        note = " ⚠️ 데이터 빈약" if row.get("sparse") else ""
+        lines.append(
+            f"| {row['date']} | {row['count']} | {row['high_count']} "
+            f"| {row['avg_importance']} |{note} |"
+        )
+    peak = signals.get("peak_day")
+    if peak:
+        lines.append(f"\n- 피크일: {peak['date']} ({peak['count']}건)")
+    sparse = signals.get("sparse_days", [])
+    if sparse:
+        lines.append(f"- 데이터 빈약일(⚠️): {', '.join(sparse)}")
+    lines.append("")
+
+    # ── 5. 지속 줄기 vs 단발 버스트 표 ──
+    lines.append("## 5. 지속 줄기 vs 단발 버스트")
+    lines.append("")
+    lines.append("| 태그 | 등장(정규화) | 일수 | 구분 |")
+    lines.append("|------|------|------|------|")
+    for t in signals.get("tags", [])[:20]:
+        if t["persistent"]:
+            label = "지속 줄기"
+        elif t["burst"]:
+            label = "단발 버스트"
+        else:
+            label = ""
+        lines.append(f"| {t['tag']} | {t['count']} | {t['day_span']} | {label} |")
+    stems = signals.get("persistent_stems", [])
+    bursts = signals.get("bursts", [])
+    if stems:
+        lines.append(f"\n**지속 줄기**: {', '.join(t['tag'] for t in stems[:10])}")
+    if bursts:
+        lines.append(f"**단발 버스트**: {', '.join(t['tag'] for t in bursts[:10])}")
+    lines.append("")
+
+    # ── 6. 소스 편중도 표 ──
+    lines.append("## 6. 소스 편중도")
+    lines.append("")
+    lines.append("| 소스 | 건수 | 점유율 | 평균중요도 | 노이즈 |")
+    lines.append("|------|------|--------|-----------|--------|")
+    for s in signals.get("sources", []):
+        noise_mark = " ⚠️" if s.get("noise_candidate") else ""
+        lines.append(
+            f"| {s['source']} | {s['count']} | {round(s.get('share', 0) * 100, 1)}% "
+            f"| {s['avg_importance']} |{noise_mark} |"
+        )
+    noise_srcs = signals.get("noise_sources", [])
+    if noise_srcs:
+        lines.append(f"\n> ⚠️ 노이즈 후보 소스: {[s['source'] for s in noise_srcs]}")
+    lines.append("")
+
+    # ── 7. 공방 관련 픽 / 공방 즉시 착수 액션 ──
+    lines.append("## 7. 공방 관련 픽 / 공방 즉시 착수 액션")
+    lines.append("")
+    picks = signals.get("workshop_picks", [])
+    lines.append("### 공방 관련 픽 (relevance ≥ 7)")
+    lines.append("")
+    if picks:
+        for a in picks[:10]:
+            lines.append(
+                f"- [{a.get('title', '')}]({a.get('url', '')}) "
+                f"— 중요도 {a.get('importance', 0)}, 관련도 {a.get('relevance', 0)}"
+            )
+    else:
+        lines.append("_해당 없음_")
+    lines.append("")
+    lines.append("### 공방 즉시 착수 액션")
+    lines.append("")
+    for act in synthesis.get("workshop_actions", []):
+        lines.append(f"- {act}")
+    if not synthesis.get("workshop_actions"):
+        lines.append("_해당 없음_")
+    lines.append("")
+
+    # ── 8. 일간 아이디어 통합 ──
+    lines.append("## 8. 일간 아이디어 통합")
+    lines.append("")
+    if ideas:
+        for idea in ideas:
+            days_str = f"({idea['days']}일 반복)" if idea['days'] > 1 else "(1회)"
+            lines.append(f"- {idea['text']} {days_str}")
+    else:
+        lines.append("_해당 없음_")
+    lines.append("")
+
+    # ── 9. 다음 달 관전 포인트 ──
+    lines.append("## 9. 다음 달 관전 포인트")
+    lines.append("")
+    for w in synthesis.get("next_month_watch", []):
+        lines.append(f"- {w}")
+    if not synthesis.get("next_month_watch"):
+        lines.append("_해당 없음_")
+    lines.append("")
+
+    # ── 10. 월간 서술 ──
+    lines.append("## 10. 월간 흐름 서술")
+    lines.append("")
+    lines.append(synthesis.get("narrative", ""))
+    lines.append("")
+
+    # ── 11. 대표 원문 링크 ──
+    lines.append("## 11. 대표 원문 링크")
+    lines.append("")
+    for a in top[:20]:
+        lines.append(
+            f"- [{a.get('title', '')}]({a.get('url', '')}) "
+            f"— {a.get('source', '')} (중요도 {a.get('importance', 0)}, "
+            f"교차출처 {a.get('cross_source_count', 1)})"
+        )
+    if not top:
+        lines.append("_해당 없음_")
+    lines.append("")
+
+    # ── 12. 범위 외 참고 항목 ──
+    lines.append("## 12. 범위 외 참고 항목")
+    lines.append("")
+    if out_of_period:
+        for a in out_of_period[:20]:
+            lines.append(f"- {a.get('title', '')} — {a.get('published_at') or '(날짜 미상)'}")
+        if len(out_of_period) > 20:
+            lines.append(f"- ...외 {len(out_of_period) - 20}건")
+    else:
+        lines.append("_해당 없음_")
+    lines.append("")
+
+    return "\n".join(lines)
+
+
 # ── 일간 save_report (기존 — 수정 금지) ──────────────────────────────────────
 
 def save_report(reports_dir, date, content) -> str:

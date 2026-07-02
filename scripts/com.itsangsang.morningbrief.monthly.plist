@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.itsangsang.morningbrief.monthly</string>
+  <!-- ProgramArguments / WorkingDirectory 의 /ABS/PATH 는 README 절차대로 절대경로 치환. -->
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Library/Frameworks/Python.framework/Versions/3.14/bin/python3</string>
+    <string>/ABS/PATH/TO/main.py</string>
+    <string>--monthly</string>
+  </array>
+  <key>WorkingDirectory</key>
+  <string>/ABS/PATH/TO</string>
+  <!-- 매월 1일 04:50 (Day=1). 일간 04:30·주간 일요일 04:40 이후로 배치해 DB 경합 최소화 -->
+  <key>StartCalendarInterval</key>
+  <dict>
+    <key>Day</key><integer>1</integer>
+    <key>Hour</key><integer>4</integer>
+    <key>Minute</key><integer>50</integer>
+  </dict>
+  <key>StandardOutPath</key><string>/tmp/morningbrief.monthly.out.log</string>
+  <key>StandardErrorPath</key><string>/tmp/morningbrief.monthly.err.log</string>
+  <key>RunAtLoad</key><false/>
+  <key>KeepAlive</key><false/>
+</dict>
+</plist>

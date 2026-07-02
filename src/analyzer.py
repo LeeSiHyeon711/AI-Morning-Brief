@@ -226,6 +226,118 @@ def _fallback_weekly(signals, ideas, top_articles) -> dict:
             "workshop_actions": actions, "next_week_watch": watch, "narrative": narr}
 
 
+# ── 월간 합성 함수 (FEAT-12) — 기존 일간·주간 코드 수정 없이 하단에 추가 ──────────
+
+def synthesize_monthly(signals, ideas, top_articles, basis, operator_profile,
+                       api_key=None, model="claude-sonnet-4-6",
+                       max_output_tokens=20000, force_fallback=False) -> dict:
+    """월간 흐름 합성. 각 핵심 주장에 신뢰도 라벨을 부여(#12-2). 2차 필터(공방 적용성)를 랭킹으로 수행.
+
+    반환: {"mode": "claude"|"fallback", "synthesis": {...}}.
+    synthesis 스키마(라벨은 문자열 앞에 '[확정] '/'[추정] '/'[주의] ' 접두):
+      {"one_line_summary": str,
+       "flow_themes": [str,...<=4],       # 각 항목 라벨 접두
+       "notable_events": [str,...<=3],    # 각 항목 라벨 접두
+       "workshop_actions": [str,...<=3],  # 2차 필터 = 공방 적용성 상위
+       "next_month_watch": [str,...<=3],
+       "narrative": str}
+    모든 예외(키없음·모델오류·API실패·JSON파싱실패)는 _fallback_monthly로 흡수.
+    """
+    if force_fallback or not api_key:
+        return {"mode": "fallback",
+                "synthesis": _fallback_monthly(signals, ideas, top_articles, basis)}
+    try:
+        prompt = _build_monthly_prompt(signals, ideas, top_articles, basis, operator_profile)
+        text = _call_claude(prompt, api_key, model, max_output_tokens)  # 기존 호출 재사용
+        data = _parse_monthly_response(text)
+        return {"mode": "claude", "synthesis": data}
+    except Exception as ex:
+        logging.error("월간 합성 실패 → fallback: %s", ex)
+        return {"mode": "fallback",
+                "synthesis": _fallback_monthly(signals, ideas, top_articles, basis)}
+
+
+def _build_monthly_prompt(signals, ideas, top_articles, basis, operator_profile) -> dict:
+    """월간 합성 system/user. 신뢰도 라벨 규칙 + 2단계 필터(2차=공방 적용성) + 정량 신호 근거 투입."""
+    sig = {
+        "total": signals["total"], "span_days": signals["span_days"],
+        "peak_day": signals["peak_day"], "sparse_days": signals["sparse_days"],
+        "persistent_stems": [{"tag": t["tag"], "count": t["count"], "day_span": t["day_span"]}
+                             for t in signals["persistent_stems"][:14]],
+        "bursts": [{"tag": t["tag"], "count": t["count"], "day_span": t["day_span"]}
+                   for t in signals["bursts"][:8]],
+        "sources_top": signals["sources"][:8],       # 편중도 (#12-5)
+        "noise_sources": signals["noise_sources"],    # (#12-6)
+    }
+    # 각 대표 기사에 교차출처수 동봉 → 신뢰도 라벨 판정 근거 (#12-2)
+    arts = [{"title": a["title"], "source": a["source"], "summary": a.get("summary", ""),
+             "tags": a.get("tags", []), "importance": a.get("importance", 0),
+             "relevance": a.get("relevance", 0),
+             "cross_source_count": a.get("cross_source_count", 1)} for a in top_articles]
+    system = (
+        "당신은 IT상상공방 운영자의 'AI 월간 흐름 분석가'다. 아래 <운영자 프로필>을 렌즈로,"
+        " <정량 신호>와 <대표 기사>를 반드시 근거로 삼아(서술이 숫자·출처와 모순되지 않게)"
+        " 한 달의 구조적 흐름을 합성하라.\n"
+        "■ 2단계 필터: 1차 관련성 통과분만 받았다. 당신은 2차로 '상상공방 적용 가능성'을 기준으로"
+        " 흐름·액션의 우선순위를 정하라(무관한 것은 뒤로 미루되 삭제하지 말 것).\n"
+        "■ 신뢰도 라벨(필수): flow_themes·notable_events의 각 항목과 narrative의 각 핵심 주장 앞에"
+        " 다음 규칙으로 라벨을 접두하라 —\n"
+        "  [확정] : 교차출처(cross_source_count)≥2 이거나 공식 릴리스/공식 블로그로 확인된 사실.\n"
+        "  [추정] : 단일 출처·해석·전망(추론이 포함된 서술).\n"
+        "  [주의] : 미확인·논란·반박 가능성이 있는 주장.\n"
+        " 지정된 JSON만 출력하라.\n\n"
+        "<운영자 프로필>\n" + operator_profile + "\n</운영자 프로필>")
+    user = (
+        "<분석 기반>\n" + json.dumps(basis, ensure_ascii=False) + "\n</분석 기반>\n\n"
+        "<정량 신호 (JSON)>\n" + json.dumps(sig, ensure_ascii=False) + "\n</정량 신호>\n\n"
+        "<일간 아이디어 통합 (반복일수 days 포함)>\n" + json.dumps(ideas, ensure_ascii=False) + "\n</일간 아이디어>\n\n"
+        "<대표 기사 (JSON, cross_source_count 포함)>\n" + json.dumps(arts, ensure_ascii=False) + "\n</대표 기사>\n\n"
+        "출력 스키마:\n"
+        '{"one_line_summary":"<이번 달 한 줄 요약>",'
+        '"flow_themes":["[라벨] 주요 흐름 테마 최대 4개"],'
+        '"notable_events":["[라벨] 주목 사건 최대 3개"],'
+        '"workshop_actions":["공방 즉시 착수 액션 최대 3개(2차=공방 적용성 상위, 반복 아이디어 우선)"],'
+        '"next_month_watch":["다음 달 관전 포인트 최대 3개"],'
+        '"narrative":"<월간 흐름 서술, 한국어, 핵심 주장마다 [라벨] 접두, 정량 신호에 정합>"}')
+    return {"system": system, "user": user}
+
+
+def _parse_monthly_response(text: str) -> dict:
+    """첫 { ~ 마지막 } 슬라이스 후 json.loads + 누락 필드 기본값 보정."""
+    s, e = text.find("{"), text.rfind("}")
+    if s == -1 or e == -1:
+        raise ValueError("월간 응답에 JSON 객체가 없음")
+    data = json.loads(text[s:e + 1])
+    data.setdefault("one_line_summary", "")
+    for k in ("flow_themes", "notable_events", "workshop_actions", "next_month_watch"):
+        data.setdefault(k, [])
+    data.setdefault("narrative", "")
+    return data
+
+
+def _label_by_cross_source(article) -> str:
+    """fallback용 규칙 라벨: 교차출처≥2 → [확정], ==1 → [추정]. (코드 기계 부여)"""
+    return "[확정]" if int(article.get("cross_source_count", 1)) >= 2 else "[추정]"
+
+
+def _fallback_monthly(signals, ideas, top_articles, basis) -> dict:
+    """규칙기반 월간 합성(Claude 없이). 신뢰도 라벨을 교차출처수로 기계 부여(#12-2)."""
+    stems = [t["tag"] for t in signals["persistent_stems"][:6]]
+    one = (f"이번 달 대표 {basis.get('represented', 0)}건(수집 {basis.get('collected', 0)}·"
+           f"1차통과 {basis.get('first_stage_passed', 0)}). 지속 줄기: "
+           + (", ".join(stems) if stems else "없음"))
+    themes = [f"{_label_by_cross_source(a)} {a['title']}" for a in top_articles[:4]]
+    events = [f"{_label_by_cross_source(a)} {a['title']}" for a in top_articles[:3]]
+    actions = [i["text"] for i in ideas[:3]] or [a["title"] for a in signals["workshop_picks"][:3]]
+    watch = [t["tag"] for t in signals["persistent_stems"][:3]]
+    noise = basis.get("noise", {})
+    narr = ("[확정] [기본 월간 리포트] " + one
+            + (f" / 노이즈 제외 {noise.get('_total', 0)}건" if noise else "")
+            + (f" / 범위 외 {basis.get('out_of_period', 0)}건" if basis.get("out_of_period") else ""))
+    return {"one_line_summary": one, "flow_themes": themes, "notable_events": events,
+            "workshop_actions": actions, "next_month_watch": watch, "narrative": narr}
+
+
 # ── 일간 fallback (기존 — 수정 금지) ──────────────────────────────────────────
 
 def _fallback_analyze(articles: list) -> dict:

@@ -187,6 +187,78 @@ def build_weekly_message(week_key, monday, sunday, signals, synthesis,
     return msg
 
 
+def build_monthly_message(ym, first, last, signals, basis, synthesis,
+                          report_path, char_limit=2000) -> str:
+    """월간 다이제스트(9블록, plain content, char_limit 이내 완결). 절삭 아닌 의도적 요약.
+
+    블록 순서(스펙 M-J):
+      1) 📅 월(YYYY-MM) + 한 줄 요약(synthesis['one_line_summary'])
+      2) 🔎 분석 기반(#12-7): 수집·1차통과·대표·범위외·노이즈 + 신뢰도 카운트(확정/추정/주의)
+      3) 🌊 월간 핵심 흐름 테마 Top4(synthesis['flow_themes'][:4], [라벨] 그대로)
+      4) ⭐ 주목 사건 Top3(synthesis['notable_events'][:3], [라벨] 그대로)
+      5) 🌳 지속 줄기 태그 Top6("태그 N·M일" 인라인, count=정규화)
+      6) ⚠️ 편중/노이즈(#12-5,6): 최다 소스 점유율 + 노이즈 소스 Top1
+      7) 🎯 공방 즉시 착수 액션 Top3(synthesis['workshop_actions'][:3])
+      8) 🔭 다음 달 관전(synthesis['next_month_watch'])
+      9) 📄 전체 리포트 경로(report_path)
+
+    Args:
+        ym: 월 키 (예: "2026-06")
+        first: 해당 월 1일 date
+        last: 해당 월 말일 date
+        signals: aggregate_month() 반환 dict
+        basis: run_monthly의 분석 기반 dict(collected/first_stage_passed/represented/out_of_period/noise)
+        synthesis: synthesize_monthly()의 synthesis dict
+        report_path: 전체 리포트 파일 경로 문자열
+        char_limit: 최대 문자 수 (기본 2000)
+
+    Returns:
+        길이 <= char_limit 인 Discord 메시지 문자열
+    """
+    import re
+    stems = signals.get("persistent_stems", [])[:6]
+    srcs = signals.get("sources", [])
+    noise = signals.get("noise_sources", [])
+    noise_basis = basis.get("noise", {}) or {}
+
+    # 신뢰도 카운트: flow_themes+notable_events+narrative의 라벨 등장 수 집계 (#12-2 요약)
+    joined = " ".join(synthesis.get("flow_themes", []) + synthesis.get("notable_events", [])
+                      + [synthesis.get("narrative", "")])
+    conf = {lab: len(re.findall(re.escape(f"[{lab}]"), joined)) for lab in ("확정", "추정", "주의")}
+
+    L = [f"📅 **AI Morning Brief 월간 — {ym} ({first.month}/{first.day}~{last.month}/{last.day})**",
+         (synthesis.get("one_line_summary") or "").strip()]
+    L.append(f"\n🔎 분석 기반: 수집 {basis.get('collected', 0)} · 1차통과 {basis.get('first_stage_passed', 0)}"
+             f" · 대표 {basis.get('represented', 0)} · 범위외 {basis.get('out_of_period', 0)}"
+             f" · 노이즈 {noise_basis.get('_total', 0)}"
+             f" · 신뢰도 [확정 {conf['확정']}/추정 {conf['추정']}/주의 {conf['주의']}]")
+    if synthesis.get("flow_themes"):
+        L.append("🌊 월간 흐름:\n" + "\n".join(f"• {x}" for x in synthesis["flow_themes"][:4]))
+    if synthesis.get("notable_events"):
+        L.append("⭐ 주목 사건:\n" + "\n".join(f"{i + 1}. {x}" for i, x in enumerate(synthesis["notable_events"][:3])))
+    if stems:
+        L.append("🌳 지속 줄기: " + " · ".join(f"{t['tag']} {t['count']}·{t['day_span']}일" for t in stems))
+    if srcs or noise:
+        top_src = srcs[0] if srcs else None
+        parts = []
+        if top_src:
+            parts.append(f"최다 {top_src['source']} {round(top_src['share'] * 100)}%")
+        if noise:
+            parts.append(f"노이즈 {noise[0]['source']} {noise[0]['count']}건·평균 {noise[0]['avg_importance']}")
+        if parts:
+            L.append("⚠️ 편중/노이즈: " + " · ".join(parts))
+    if synthesis.get("workshop_actions"):
+        L.append("🎯 공방 즉시 착수:\n" + "\n".join(f"{i + 1}. {x}" for i, x in enumerate(synthesis["workshop_actions"][:3])))
+    if synthesis.get("next_month_watch"):
+        L.append("🔭 다음 달 관전: " + " / ".join(synthesis["next_month_watch"][:3]))
+    L.append(f"📄 전체 리포트: {report_path}")
+
+    msg = "\n".join(s for s in L if s)
+    if len(msg) > char_limit:              # 안전망(설계상 9블록은 2000자 내 완결)
+        msg = msg[:char_limit - 1] + "…"
+    return msg
+
+
 def send_discord(webhook_url, message) -> bool:
     """Discord Webhook으로 메시지를 전송한다.
 

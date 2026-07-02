@@ -44,6 +44,7 @@ RSS 수집 → SQLite 저장 → Claude 분석/선별 → Markdown 리포트 →
 |------|------|
 | **일간 브리핑** | 지정 RSS를 수집 → Claude가 기사별 요약·태그·중요도·관련도 평가 → 핵심 변화/적용 아이디어/액션을 한 장으로 |
 | **주간 흐름 리포트 (`--weekly`)** | 7일치를 집계해 *지속 줄기 vs 단발 버스트*, 노이즈 소스, 공방 적용 픽을 ISO 주차 단위로 종합 |
+| **월간 흐름 리포트 (`--monthly`)** | 직전 달 전체를 2단계 필터·소스 편중 정규화로 집계해 신뢰도 라벨([확정]/[추정]/[주의])이 붙은 월간 흐름·주목 사건을 Discord 9블록 다이제스트 + 전문(.md)으로 종합 |
 | **무중단 fallback** | API 키·모델명·네트워크가 실패해도 키워드 기반 요약으로 자동 강등 → **파이프라인은 절대 멈추지 않음** |
 | **소스 진단 (`--check-sources`)** | 실행 전 RSS 접근성을 읽기 전용으로 점검(HTTP 상태·기사 수) |
 | **catch-up 수집** | Mac이 슬립이어서 놓친 날도 다음 실행이 그 시점부터 보충 수집 |
@@ -119,10 +120,27 @@ python main.py
 
 # 주간 흐름 리포트
 python main.py --weekly
+
+# 월간 흐름 리포트
+python main.py --monthly
 ```
 
 - 키가 없어도 **fallback 요약으로 정상 동작**한다(파이프라인 중단 없음).
 - macOS 무인 스케줄(launchd) 등록, TCC 보호 폴더 회피, 운영 배포본 동기화, 문제 해결 등 **상세 운영 매뉴얼은 [`RUNBOOK.md`](RUNBOOK.md)** 참조.
+
+---
+
+## 월간 흐름 리포트(`--monthly`) 운영
+
+1. **수동 생성**: `python main.py --monthly` (강제 특정 달: `python main.py --monthly --month 2026-06`)
+2. **스케줄 등록(매월 1일 04:50)**:
+   - `scripts/com.itsangsang.morningbrief.monthly.plist` 의 `/ABS/PATH/TO` 를 실제 절대경로(보호 폴더 밖 배포본 경로)로 치환 — 주간과 동일한 절차는 [`RUNBOOK.md`](RUNBOOK.md#launchd-스케줄-등록-macos) 참조.
+   - `cp scripts/com.itsangsang.morningbrief.monthly.plist ~/Library/LaunchAgents/`
+   - `launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.itsangsang.morningbrief.monthly.plist`
+   - `launchctl enable gui/$(id -u)/com.itsangsang.morningbrief.monthly`
+3. **운영 배포본 동기화(보호 폴더 밖)**: `rsync -a --delete <repo>/05-개발/ ~/AI-Morning-Brief-run/` — 일간·주간과 동일하게 `~/AI-Morning-Brief-run/`에서 실행되도록 plist 경로를 맞춘다.
+4. **산출물**: `reports/<YYYY>/monthly/M##.md`(전문 — 분석 기반·신뢰도 라벨·노이즈 상단 명시) + 동일 Discord 웹훅으로 9블록 다이제스트 1건(plain content, 2000자 이내).
+5. **실행 순서**: 일간 04:30 → (일요일) 주간 04:40 → (매월 1일) 월간 04:50. 모두 `meta` 커서로 멱등이라 중복 실행은 무해하다.
 
 ---
 
