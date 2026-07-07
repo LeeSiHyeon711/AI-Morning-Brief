@@ -1,0 +1,20 @@
+# 비밀값 — 절대 이미지에 포함 금지 (Secret Manager로 런타임 주입 예정, Task 5)
+.env
+
+# 로컬 런타임 상태 — 컨테이너는 항상 GCS에서 받아온다(빌드 시점에 절대 포함 금지)
+data/
+reports/
+
+# 개발 전용 산출물 — 런타임에 불필요
+tests/
+빌드노트.md
+README.md
+RUNBOOK.md
+
+# 버전관리/캐시
+.git
+.gitignore
+.DS_Store
+__pycache__/
+*.py[cod]
+.pytest_cache/
