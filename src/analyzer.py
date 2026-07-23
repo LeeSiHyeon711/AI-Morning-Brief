@@ -16,6 +16,71 @@ FALLBACK_KEYWORDS = [
     "gemini", "cursor", "automation", "github actions", "n8n",
 ]
 
+# ── 출력 스키마 (tool-use 강제) ────────────────────────────────────────────────
+# 자유 텍스트 JSON을 프롬프트로 "부탁"하고 find-brace+json.loads로 파싱하던 방식은
+# 모델 출력에 문법 오류가 하나라도 있으면 통째로 fallback으로 강등됐다(2026-07-23 사고).
+# Anthropic tool-use(tool_choice 강제)로 출력 구조를 못박아 파싱 취약성을 제거한다.
+_STR_ARRAY = {"type": "array", "items": {"type": "string"}}
+
+DAILY_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "articles": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "url": {"type": "string"},
+                    "summary": {"type": "string"},
+                    "tags": _STR_ARRAY,
+                    "importance": {"type": "integer"},
+                    "relevance": {"type": "integer"},
+                },
+                "required": ["url", "summary", "tags", "importance", "relevance"],
+            },
+        },
+        "briefing": {
+            "type": "object",
+            "properties": {
+                "headline_changes": _STR_ARRAY,
+                "sangsang_ideas": _STR_ARRAY,
+                "action_items": _STR_ARRAY,
+                "summary_text": {"type": "string"},
+            },
+            "required": ["headline_changes", "sangsang_ideas", "action_items", "summary_text"],
+        },
+    },
+    "required": ["articles", "briefing"],
+}
+
+WEEKLY_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "one_line_summary": {"type": "string"},
+        "flow_themes": _STR_ARRAY,
+        "notable_events": _STR_ARRAY,
+        "workshop_actions": _STR_ARRAY,
+        "next_week_watch": _STR_ARRAY,
+        "narrative": {"type": "string"},
+    },
+    "required": ["one_line_summary", "flow_themes", "notable_events",
+                 "workshop_actions", "next_week_watch", "narrative"],
+}
+
+MONTHLY_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "one_line_summary": {"type": "string"},
+        "flow_themes": _STR_ARRAY,
+        "notable_events": _STR_ARRAY,
+        "workshop_actions": _STR_ARRAY,
+        "next_month_watch": _STR_ARRAY,
+        "narrative": {"type": "string"},
+    },
+    "required": ["one_line_summary", "flow_themes", "notable_events",
+                 "workshop_actions", "next_month_watch", "narrative"],
+}
+
 
 def analyze(
     articles: list,
@@ -53,8 +118,13 @@ def analyze(
 
     try:
         prompt = _build_prompt(articles[:max_articles], operator_profile)
-        text = _call_claude(prompt, api_key, model, max_output_tokens)
-        result = _parse_response(text, articles)
+        data = _call_claude_json(
+            prompt, api_key, model, max_output_tokens,
+            tool_name="emit_daily_brief",
+            description="기사별 평가와 전체 브리핑을 지정 스키마로 반환한다.",
+            schema=DAILY_SCHEMA,
+        )
+        result = _parse_response(data, articles)
         result["mode"] = "claude"
         return result
     except Exception as ex:
@@ -112,16 +182,37 @@ def _call_claude(prompt: dict, api_key: str, model: str, max_tokens: int) -> str
     return "".join(getattr(b, "text", "") for b in msg.content)
 
 
-def _parse_response(text: str, articles: list) -> dict:
-    """응답 텍스트에서 JSON을 추출·파싱하고 누락 필드를 기본값으로 보정한다.
+def _call_claude_json(prompt: dict, api_key: str, model: str, max_tokens: int,
+                      tool_name: str, description: str, schema: dict) -> dict:
+    """tool-use로 출력 스키마를 강제해, 모델이 반환한 구조화 dict를 그대로 반환한다.
 
-    파싱 실패 시 예외를 올려 analyze가 fallback으로 흡수하게 한다.
+    tool_choice로 지정 툴 호출을 강제하므로 모델은 자유 텍스트가 아니라 스키마에 맞는
+    구조화 입력(tool_use.input)을 낸다 → find-brace + json.loads 파싱이 불필요해지고,
+    문자열 값의 이스케이프 오류 등으로 전체가 fallback되던 취약성이 사라진다.
+    tool_use 블록이 없으면 예외 → 호출부의 except가 fallback으로 흡수한다.
     """
-    s, e = text.find("{"), text.rfind("}")
-    if s == -1 or e == -1:
-        raise ValueError("응답에 JSON 객체({...})가 없음")
-    data = json.loads(text[s : e + 1])
+    from anthropic import Anthropic  # 런타임 임포트 (SDK 미설치 시 예외 → fallback)
 
+    client = Anthropic(api_key=api_key)
+    msg = client.messages.create(
+        model=model,
+        max_tokens=max_tokens,
+        system=prompt["system"],
+        messages=[{"role": "user", "content": prompt["user"]}],
+        tools=[{"name": tool_name, "description": description, "input_schema": schema}],
+        tool_choice={"type": "tool", "name": tool_name},
+    )
+    for block in msg.content:
+        if getattr(block, "type", None) == "tool_use":
+            return dict(block.input)
+    raise ValueError("tool_use 응답이 없음 (스키마 강제 실패)")
+
+
+def _parse_response(data: dict, articles: list) -> dict:
+    """tool-use로 강제된 응답 dict의 누락 필드를 기본값으로 방어 보정한다.
+
+    (스키마 required로 대부분 채워지나, 서버측 검증이 느슨할 수 있어 기본값을 둔다.)
+    """
     data.setdefault("articles", [])
     b = data.setdefault("briefing", {})
     for k in ("headline_changes", "sangsang_ideas", "action_items"):
@@ -154,8 +245,13 @@ def synthesize_weekly(signals, ideas, top_articles, operator_profile,
         return {"mode": "fallback", "synthesis": _fallback_weekly(signals, ideas, top_articles)}
     try:
         prompt = _build_weekly_prompt(signals, ideas, top_articles, operator_profile)
-        text = _call_claude(prompt, api_key, model, max_output_tokens)  # 기존 일간 호출 재사용
-        data = _parse_weekly_response(text)
+        raw = _call_claude_json(
+            prompt, api_key, model, max_output_tokens,
+            tool_name="emit_weekly_synthesis",
+            description="주간 흐름 합성을 지정 스키마로 반환한다.",
+            schema=WEEKLY_SCHEMA,
+        )
+        data = _parse_weekly_response(raw)
         return {"mode": "claude", "synthesis": data}
     except Exception as ex:
         logging.error("주간 합성 실패 → fallback: %s", ex)
@@ -198,12 +294,8 @@ def _build_weekly_prompt(signals, ideas, top_articles, operator_profile) -> dict
     return {"system": system, "user": user}
 
 
-def _parse_weekly_response(text: str) -> dict:
-    """첫 { ~ 마지막 } 슬라이스 후 json.loads + 누락 필드 기본값 보정."""
-    s, e = text.find("{"), text.rfind("}")
-    if s == -1 or e == -1:
-        raise ValueError("주간 응답에 JSON 객체가 없음")
-    data = json.loads(text[s:e + 1])
+def _parse_weekly_response(data: dict) -> dict:
+    """tool-use로 강제된 주간 응답 dict의 누락 필드를 기본값으로 방어 보정한다."""
     data.setdefault("one_line_summary", "")
     for k in ("flow_themes", "notable_events", "workshop_actions", "next_week_watch"):
         data.setdefault(k, [])
@@ -248,8 +340,13 @@ def synthesize_monthly(signals, ideas, top_articles, basis, operator_profile,
                 "synthesis": _fallback_monthly(signals, ideas, top_articles, basis)}
     try:
         prompt = _build_monthly_prompt(signals, ideas, top_articles, basis, operator_profile)
-        text = _call_claude(prompt, api_key, model, max_output_tokens)  # 기존 호출 재사용
-        data = _parse_monthly_response(text)
+        raw = _call_claude_json(
+            prompt, api_key, model, max_output_tokens,
+            tool_name="emit_monthly_synthesis",
+            description="월간 흐름 합성을 지정 스키마로 반환한다.",
+            schema=MONTHLY_SCHEMA,
+        )
+        data = _parse_monthly_response(raw)
         return {"mode": "claude", "synthesis": data}
     except Exception as ex:
         logging.error("월간 합성 실패 → fallback: %s", ex)
@@ -302,12 +399,8 @@ def _build_monthly_prompt(signals, ideas, top_articles, basis, operator_profile)
     return {"system": system, "user": user}
 
 
-def _parse_monthly_response(text: str) -> dict:
-    """첫 { ~ 마지막 } 슬라이스 후 json.loads + 누락 필드 기본값 보정."""
-    s, e = text.find("{"), text.rfind("}")
-    if s == -1 or e == -1:
-        raise ValueError("월간 응답에 JSON 객체가 없음")
-    data = json.loads(text[s:e + 1])
+def _parse_monthly_response(data: dict) -> dict:
+    """tool-use로 강제된 월간 응답 dict의 누락 필드를 기본값으로 방어 보정한다."""
     data.setdefault("one_line_summary", "")
     for k in ("flow_themes", "notable_events", "workshop_actions", "next_month_watch"):
         data.setdefault(k, [])
